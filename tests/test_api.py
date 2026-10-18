@@ -107,3 +107,23 @@ def test_conversation_lock_pool_serializes_writes():
         assert pool._locks == {}
 
     asyncio.run(scenario())
+
+
+
+def test_media_endpoint_rejects_unsupported_file_type(tmp_path, monkeypatch):
+    import freemind.storage as storage
+    engine = create_engine(f"sqlite:///{tmp_path / 'media.db'}", connect_args={"check_same_thread": False})
+    Base.metadata.create_all(engine)
+    monkeypatch.setattr(storage, "SessionLocal", sessionmaker(bind=engine, expire_on_commit=False))
+    store = ChatStore()
+    app = create_app(store=store, provider_manager=FakeProviderManager())
+    with TestClient(app) as client:
+        conversation_id = client.post("/api/conversations", json={}).json()["conversation"]["id"]
+        response = client.post("/api/chat/media", json={
+            "conversation_id": conversation_id,
+            "message": "請分析",
+            "attachments": [{"filename": "unknown.bin", "mime_type": "application/octet-stream", "data": "dGVzdA=="}],
+        })
+        assert response.status_code == 415
+        assert "不支援的檔案格式" in response.json()["detail"]
+        assert client.get(f"/api/conversations/{conversation_id}/messages").json()["messages"] == []
