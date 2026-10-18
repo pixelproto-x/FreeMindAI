@@ -1,0 +1,34 @@
+services:
+  - type: web
+    name: freemind-ai
+    runtime: docker
+    plan: starter
+    healthCheckPath: /api/health
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      - key: APP_PASSWORD
+        generateValue: true
+      - key: DATABASE_URL
+        fromDatabase:
+          name: freemind-ai-db
+          property: connectionString
+      - key: PROVIDER_ORDER
+        value: groq,openrouter,gemini,openai,mistral,custom
+      - key: GROQ_API_KEY
+        sync: false
+      - key: GROQ_MODEL
+        value: openai/gpt-oss-120b
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_MODEL
+        value: gemini-3.8-flash
+      - key: OPENROUTER_API_KEY
+        sync: false
+      - key: OPENROUTER_MODEL
+        sync: false
+databases:
+  - name: freemind-ai-db
+    plan: basic-256mb
+    databaseName: freemind_ai
+    user: freemind_ai

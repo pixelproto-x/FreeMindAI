@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0b1020">
+  <meta name="description" content="FreeMind AI — 可切換模型、保留對話、遇到服務失效時自動備援的個人 AI 助手。">
+  <title>FreeMind AI</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar" id="sidebar">
+      <div class="brand-row">
+        <div class="brand-mark" aria-hidden="true">F</div>
+        <div class="brand-copy"><strong>FreeMind</strong><span>PERSONAL AI</span></div>
+        <button class="icon-button mobile-only" id="closeSidebar" aria-label="關閉側邊欄">×</button>
+      </div>
+      <button class="new-chat-button" id="newChat"><span aria-hidden="true">＋</span> 新對話</button>
+      <div class="section-label">最近對話 <span id="conversationCount">0</span></div>
+      <nav class="conversation-list" id="conversationList" aria-label="對話紀錄"></nav>
+      <div class="sidebar-bottom">
+        <div class="server-indicator"><span class="status-dot" id="healthDot"></span><span id="healthLabel">檢查服務中</span></div>
+        <button class="settings-button" id="openStatus"><span aria-hidden="true">◈</span> AI 服務狀態 <span class="chevron">›</span></button>
+        <div class="sidebar-note">對話儲存在目前部署的資料庫。API 金鑰只放在伺服器環境變數。</div>
+      </div>
+    </aside>
+    <div class="sidebar-scrim" id="sidebarScrim"></div>
+    <main class="main-panel">
+      <header class="topbar">
+        <button class="icon-button mobile-only" id="openSidebar" aria-label="開啟側邊欄">☰</button>
+        <div class="page-context"><span class="eyebrow">PERSONAL WORKSPACE</span><strong id="activeTitle">新對話</strong></div>
+        <div class="topbar-right"><span class="secure-pill"><span>●</span> 私人工作區</span><button class="text-button" id="refreshStatus">重新檢查</button></div>
+      </header>
+      <section class="chat-scroll" id="chatScroll">
+        <div class="welcome" id="welcome">
+          <div class="welcome-orb"><span>F</span><i></i><b></b></div>
+          <div class="welcome-kicker">YOUR PERSONAL AI</div>
+          <h1>讓想法，自由延伸。</h1>
+          <p>自然對話、延續上下文；當一個 AI 服務暫時無法使用時，系統會依序嘗試其他已設定的服務。</p>
+          <div class="suggestion-grid">
+            <button class="suggestion" data-prompt="幫我把一個想法整理成清楚的計畫。"><span class="suggestion-icon">✳</span><span><strong>整理想法</strong><small>將零散思路變成可執行計畫</small></span><span class="suggestion-arrow">↗</span></button>
+            <button class="suggestion" data-prompt="請用容易理解的方式教我一個新概念，先說原理再舉例。"><span class="suggestion-icon">⌘</span><span><strong>學習新概念</strong><small>先理解原理，再循序練習</small></span><span class="suggestion-arrow">↗</span></button>
+            <button class="suggestion" data-prompt="幫我檢查一段程式碼的錯誤，指出原因與穩定的修法。"><span class="suggestion-icon">{ }</span><span><strong>解決程式問題</strong><small>找出原因，重視正確性</small></span><span class="suggestion-arrow">↗</span></button>
+            <button class="suggestion" data-prompt="幫我比較幾種解法，列出限制與風險，再推薦最穩定的一種。"><span class="suggestion-icon">◎</span><span><strong>比較解決方案</strong><small>看重可靠性和實際限制</small></span><span class="suggestion-arrow">↗</span></button>
+          </div>
+        </div>
+        <div class="messages" id="messages" aria-live="polite"></div>
+      </section>
+      <footer class="composer-area">
+        <div class="composer-wrap">
+          <textarea id="messageInput" rows="1" maxlength="12000" placeholder="傳送訊息給 FreeMind AI…" aria-label="輸入訊息"></textarea>
+          <div class="composer-controls"><span class="composer-hint">Enter 傳送 · Shift + Enter 換行</span><span class="char-count" id="charCount">0 / 12000</span><button id="sendButton" class="send-button" aria-label="傳送訊息"><span>傳送</span><span aria-hidden="true">↑</span></button></div>
+        </div>
+        <p class="disclaimer">AI 可能出錯。重要資訊請核對來源；免費服務可能有使用限制。</p>
+      </footer>
+    </main>
+  </div>
+  <div class="toast-region" id="toastRegion" aria-live="polite"></div>
+  <dialog class="status-dialog" id="statusDialog">
+    <div class="dialog-head"><div><span class="eyebrow">SYSTEM HEALTH</span><h2>AI 服務狀態</h2></div><button class="icon-button" id="closeStatus" aria-label="關閉">×</button></div>
+    <p class="dialog-intro">只顯示服務狀態，不會在瀏覽器公開 API 金鑰。遇到限流時，失效的服務會暫時冷卻，避免不停重試。</p>
+    <div class="provider-list" id="providerList"></div>
+    <div class="dialog-footer"><span id="statusSummary">正在檢查…</span><button class="primary-button" id="statusRefreshButton">重新檢查</button></div>
+  </dialog>
+  <script src="/static/app.js" defer></script>
+</body>
+</html>
