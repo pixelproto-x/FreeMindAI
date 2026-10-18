@@ -247,7 +247,16 @@
       card.append(dot, main, state); els.providerList.append(card);
     }
     const ready = data.providers.filter(x => x.state === "ready").length;
-    els.statusSummary.textContent = `${data.configured_count} 家已設定 · ${ready} 家目前未冷卻`;
+    if (data.configured_count < 2) {
+      const warning = document.createElement("div");
+      warning.className = "empty-providers";
+      warning.setAttribute("role", "status");
+      warning.textContent = data.configured_count === 1
+        ? "目前只設定 1 家 AI 服務，沒有真正的備援。這家服務遇到每日額度限制時，聊天就會暫停。請在本機 .env 再設定至少一家不同供應商（例如 Groq 或 OpenRouter）的 API Key 與可用模型，儲存後重新啟動 FreeMind AI。不要把 API Key 貼到聊天或公開 GitHub。"
+        : "目前沒有設定 AI 服務。請在本機 .env 設定至少一家供應商的 API Key 與可用模型，再重新啟動 FreeMind AI。";
+      els.providerList.prepend(warning);
+    }
+    els.statusSummary.textContent = `${data.configured_count} 家已設定 · ${ready} 家目前未冷卻${data.configured_count < 2 ? " · 備援不足" : ""}`;
   }
 
   els.input.addEventListener("input", () => { resizeInput(); updateCharCount(); });
