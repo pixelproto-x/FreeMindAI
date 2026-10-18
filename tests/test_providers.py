@@ -71,3 +71,54 @@ async def test_router_reports_fallback_when_primary_is_already_cooling(monkeypat
     monkeypatch.setattr(manager, "_request", fake_request)
     result = await manager.generate([{"role": "user", "content": "hi"}])
     assert result.fallback_used is True
+
+
+@pytest.mark.asyncio
+async def test_gemini_tries_fallback_model_after_primary_429(monkeypatch):
+    from freemind.providers import ProviderManager
+    from freemind.config import ProviderConfig
+
+    class FakeResponse:
+        def __init__(self, status_code, payload=None, text=""):
+            self.status_code = status_code
+            self._payload = payload
+            self.text = text
+            self.headers = {}
+        @property
+        def is_success(self):
+            return 200 <= self.status_code < 300
+        def json(self):
+            return self._payload
+
+    class FakeClient:
+        def __init__(self):
+            self.calls = []
+            self.responses = [
+                FakeResponse(429, text='{"error":{"message":"model quota exceeded"}}'),
+                FakeResponse(200, {"candidates":[{"content":{"parts":[{"text":"fallback answer"}]}}]}),
+            ]
+        async def post(self, url, headers, json):
+            self.calls.append(url)
+            return self.responses.pop(0)
+
+    monkeypatch.setenv("GEMINI_FALLBACK_MODELS", "gemini-3.5-flash-lite")
+    cfg = ProviderConfig("gemini", "Gemini", "gemini", "secret", "gemini-3.8-flash")
+    manager = ProviderManager([cfg])
+    client = FakeClient()
+    result = await manager._request_gemini(client, cfg, [{"role":"user","content":"hi"}])
+    assert result == ("fallback answer", "gemini-3.5-flash-lite")
+    assert len(client.calls) == 2
+    assert "gemini-3.8-flash" in client.calls[0]
+    assert "gemini-3.5-flash-lite" in client.calls[1]
+
+
+@pytest.mark.asyncio
+async def test_manager_reports_actual_fallback_model(monkeypatch):
+    cfg = ProviderConfig("gemini", "Gemini", "gemini", "secret", "primary-model")
+    manager = ProviderManager([cfg])
+    async def fake_request(_cfg, _history):
+        return ("fallback answer", "backup-model")
+    monkeypatch.setattr(manager, "_request", fake_request)
+    result = await manager.generate([{"role":"user","content":"hi"}])
+    assert result.model == "backup-model"
+    assert result.fallback_used is True
