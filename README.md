@@ -63,7 +63,8 @@ For any host that uses PostgreSQL, set `DATABASE_URL` to its PostgreSQL connecti
 
 ## Reliability notes
 
-- A provider's HTTP 429 response starts a cooldown; daily quota-like errors use a longer default cooldown (`DAILY_QUOTA_COOLDOWN_SECONDS`, six hours by default). This is a conservative app-level rule, not a guarantee about the provider's actual reset time.
+- Gemini tries `GEMINI_FALLBACK_MODELS` (defaults: `gemini-3.5-flash-lite,gemini-3.6-flash`) when the selected model returns 429 or 404. The response metadata reports the actual model used. These models share the same API key/project and may share quota limits, so this is best-effort recovery, not guaranteed availability.
+- A provider's HTTP 429 response starts a cooldown after model-level fallback fails; daily quota-like errors use a longer default cooldown (`DAILY_QUOTA_COOLDOWN_SECONDS`, six hours by default). This is a conservative app-level rule, not a guarantee about the provider's actual reset time.
 - Temporary 5xx/timeout failures receive one bounded retry and then fall through to the next provider. 401/403 and 404 errors do not get blindly retried.
 - Request size, model output size, timeouts and chat context are bounded by environment variables.
 - Provider error bodies and secrets are not shown or logged. Statuses return only safe summaries.
