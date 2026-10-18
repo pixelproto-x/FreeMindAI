@@ -50,6 +50,7 @@
       <footer class="composer-area">
         <div class="composer-wrap">
           <textarea id="messageInput" rows="1" maxlength="12000" placeholder="傳送訊息給 FreeMind AI…" aria-label="輸入訊息"></textarea>
+          <div class="attachment-row"><input id="fileInput" type="file" multiple accept="image/*,audio/*,video/*,.pdf,.txt,.md,.csv" hidden><button id="attachButton" class="attach-button" type="button" aria-label="附加圖片、音訊、影片或文件">＋ 附加檔案</button><span id="attachmentHint">圖片・音訊・影片・PDF・文字檔（最多 5 個，合計 20 MB）</span></div><div id="attachmentList" class="attachment-list" aria-live="polite"></div>
           <div class="composer-controls"><span class="composer-hint">Enter 傳送 · Shift + Enter 換行</span><span class="char-count" id="charCount">0 / 12000</span><button id="sendButton" class="send-button" aria-label="傳送訊息"><span>傳送</span><span aria-hidden="true">↑</span></button></div>
         </div>
         <p class="disclaimer">AI 可能出錯。重要資訊請核對來源；免費服務可能有使用限制。</p>
