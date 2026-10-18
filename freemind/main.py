@@ -215,7 +215,7 @@ def create_app(store: ChatStore | None = None, provider_manager: ProviderManager
 
 
     @app.post("/api/chat/media")
-    async def chat_media(payload: MediaChatRequest, request: Request) -> dict[str, Any] | JSONResponse:
+    async def chat_media(payload: MediaChatRequest, request: Request) -> Any:
         current_store: ChatStore = request.app.state.store
         current_manager: ProviderManager = request.app.state.provider_manager
         decoded_attachments: list[dict[str, str]] = []
