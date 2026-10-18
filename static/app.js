@@ -4,12 +4,13 @@
   const els = {
     sidebar: $("#sidebar"), scrim: $("#sidebarScrim"), list: $("#conversationList"), count: $("#conversationCount"),
     title: $("#activeTitle"), welcome: $("#welcome"), messages: $("#messages"), input: $("#messageInput"),
-    send: $("#sendButton"), charCount: $("#charCount"), healthDot: $("#healthDot"), healthLabel: $("#healthLabel"),
+    send: $("#sendButton"), charCount: $("#charCount"), fileInput: $("#fileInput"), attachButton: $("#attachButton"), attachmentList: $("#attachmentList"), healthDot: $("#healthDot"), healthLabel: $("#healthLabel"),
     statusDialog: $("#statusDialog"), providerList: $("#providerList"), statusSummary: $("#statusSummary"), toastRegion: $("#toastRegion")
   };
   let currentConversationId = null;
   let isSending = false;
   let lastStatus = null;
+  let selectedFiles = [];
 
   function escapeText(text) { return String(text ?? ""); }
   function toast(message, duration = 4200) {
@@ -159,17 +160,43 @@
     els.input.disabled = value;
   }
 
+  function renderSelectedFiles() {
+    els.attachmentList.replaceChildren();
+    for (const [index, file] of selectedFiles.entries()) {
+      const chip = document.createElement("span");
+      chip.className = "attachment-chip";
+      chip.textContent = `${file.name} · ${(file.size / 1024 / 1024).toFixed(1)} MB`;
+      const remove = document.createElement("button");
+      remove.type = "button"; remove.textContent = "×"; remove.setAttribute("aria-label", `移除附件 ${file.name}`);
+      remove.addEventListener("click", () => { selectedFiles.splice(index, 1); renderSelectedFiles(); updateCharCount(); });
+      chip.append(remove); els.attachmentList.append(chip);
+    }
+  }
+
+  function fileAsBase64(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result).split(",", 2)[1] || "");
+      reader.onerror = () => reject(new Error(`讀取檔案失敗：${file.name}`));
+      reader.readAsDataURL(file);
+    });
+  }
+
   async function sendMessage(textOverride = null) {
     if (isSending) return;
     const message = (textOverride ?? els.input.value).trim();
-    if (!message) return;
+    const files = textOverride === null ? [...selectedFiles] : [];
+    if (!message && !files.length) return;
     if (!currentConversationId) {
       await createConversation();
       if (!currentConversationId) return;
     }
     els.welcome.hidden = true;
-    renderMessage({ role: "user", content: message, created_at: new Date().toISOString() });
-    els.input.value = ""; resizeInput(); updateCharCount(); setSending(true);
+    const displayMessage = [message, files.length ? `📎 ${files.map(file => file.name).join("、")}` : ""].filter(Boolean).join("\n");
+    renderMessage({ role: "user", content: displayMessage, created_at: new Date().toISOString() });
+    els.input.value = "";
+    if (files.length) { selectedFiles = []; renderSelectedFiles(); }
+    resizeInput(); updateCharCount(); setSending(true);
     const typing = document.createElement("article"); typing.className = "message-row assistant";
     const avatar = document.createElement("div"); avatar.className = "message-avatar"; avatar.textContent = "F";
     const body = document.createElement("div"); body.className = "message-body";
@@ -179,7 +206,19 @@
     for (let i = 0; i < 3; i++) dots.append(document.createElement("i"));
     body.append(meta, dots); typing.append(avatar, body); els.messages.append(typing); scrollToBottom();
     try {
-      const data = await api("/api/chat", { method: "POST", body: JSON.stringify({ conversation_id: currentConversationId, message }) });
+      let data;
+      if (files.length) {
+        const totalSize = files.reduce((sum, file) => sum + file.size, 0);
+        if (totalSize > 20 * 1024 * 1024) throw new Error("附件合計不可超過 20 MB。");
+        const attachments = await Promise.all(files.map(async file => ({
+          filename: file.name,
+          mime_type: file.type || ({pdf:"application/pdf",txt:"text/plain",md:"text/markdown",csv:"text/csv"}[file.name.split(".").pop().toLowerCase()] || "application/octet-stream"),
+          data: await fileAsBase64(file)
+        })));
+        data = await api("/api/chat/media", { method: "POST", body: JSON.stringify({ conversation_id: currentConversationId, message: message || "請分析我附上的檔案。", attachments }) });
+      } else {
+        data = await api("/api/chat", { method: "POST", body: JSON.stringify({ conversation_id: currentConversationId, message }) });
+      }
       typing.remove();
       renderMessage({ role: "assistant", content: data.content, provider: data.provider, model: data.model, created_at: new Date().toISOString() });
       if (data.fallback_used) toast(`已自動切換至 ${data.provider}，前一個服務暫時不可用。`);
@@ -210,7 +249,7 @@
   }
 
   function resizeInput() { els.input.style.height = "auto"; els.input.style.height = `${Math.min(els.input.scrollHeight, 200)}px`; }
-  function updateCharCount() { els.charCount.textContent = `${els.input.value.length.toLocaleString()} / 12000`; els.send.disabled = isSending || !els.input.value.trim(); }
+  function updateCharCount() { els.charCount.textContent = `${els.input.value.length.toLocaleString()} / 12000`; els.send.disabled = isSending || (!els.input.value.trim() && !selectedFiles.length); }
   function closeMobileSidebar() { els.sidebar.classList.remove("open"); els.scrim.classList.remove("active"); }
 
   async function refreshHealth() {
@@ -260,6 +299,18 @@
   }
 
   els.input.addEventListener("input", () => { resizeInput(); updateCharCount(); });
+  els.attachButton.addEventListener("click", () => els.fileInput.click());
+  els.fileInput.addEventListener("change", () => {
+    const incoming = Array.from(els.fileInput.files || []);
+    const combined = [...selectedFiles, ...incoming];
+    if (combined.length > 5) { toast("一次最多附加 5 個檔案。"); els.fileInput.value = ""; return; }
+    const total = combined.reduce((sum, file) => sum + file.size, 0);
+    if (combined.some(file => file.size > 15 * 1024 * 1024)) { toast("單一檔案不可超過 15 MB。"); els.fileInput.value = ""; return; }
+    if (total > 20 * 1024 * 1024) { toast("附件合計不可超過 20 MB。"); els.fileInput.value = ""; return; }
+    selectedFiles = combined;
+    els.fileInput.value = "";
+    renderSelectedFiles(); updateCharCount();
+  });
   els.input.addEventListener("keydown", (event) => {
     if (event.key === "Enter" && !event.shiftKey && !event.isComposing) { event.preventDefault(); sendMessage(); }
   });
