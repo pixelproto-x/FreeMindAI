@@ -253,3 +253,65 @@ class ProviderManager:
         if last_error:
             raise last_error
         raise ProviderError("Gemini 沒有可用的模型", cooldown_seconds=60)
+
+    async def generate_with_media(self, history: list[dict[str, str]], attachments: list[dict[str, str]]) -> ChatResult:
+        """Analyze uploaded media with Gemini's native multimodal API."""
+        cfg = next((item for item in self.configs if item.kind == "gemini"), None)
+        if cfg is None:
+            raise AllProvidersFailed(
+                [ProviderFailure("gemini", "媒體分析需要在 .env 設定 GEMINI_API_KEY，並把 gemini 加入 PROVIDER_ORDER")],
+                0,
+            )
+        if self.cooldowns.get(cfg.name, 0) > time.monotonic():
+            remaining = int(self.cooldowns[cfg.name] - time.monotonic())
+            raise AllProvidersFailed([ProviderFailure(cfg.name, f"冷卻中，約 {remaining} 秒後重試", cooldown_seconds=remaining)], remaining)
+
+        contents = []
+        for item in history:
+            role = item.get("role")
+            if role not in ("user", "assistant"):
+                continue
+            parts: list[dict[str, Any]] = [{"text": item.get("content", "")}]
+            if role == "user" and item is history[-1]:
+                for attachment in attachments:
+                    parts.append({"inlineData": {"mimeType": attachment["mime_type"], "data": attachment["data"]}})
+            contents.append({"role": "model" if role == "assistant" else "user", "parts": parts})
+
+        models = [cfg.model]
+        for candidate in os.getenv("GEMINI_FALLBACK_MODELS", "gemini-3.5-flash-lite,gemini-3.6-flash").split(","):
+            candidate = candidate.strip()
+            if candidate and candidate not in models:
+                models.append(candidate)
+        payload = {
+            "systemInstruction": {"parts": [{"text": SYSTEM_PROMPT + "\n你可以分析使用者提供的圖片、音訊、影片和文件。請只描述媒體實際能支持的內容；無法確認的部分要說明。"}]},
+            "contents": contents,
+            "generationConfig": {"temperature": 0.4, "maxOutputTokens": self.max_output_tokens},
+        }
+        timeout = httpx.Timeout(connect=10.0, read=max(float(self.request_timeout), 90.0), write=60.0, pool=10.0)
+        last_error: ProviderError | None = None
+        async with httpx.AsyncClient(timeout=timeout, follow_redirects=False) as client:
+            for index, model_name in enumerate(models):
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/{quote(model_name, safe='-._')}:generateContent"
+                response = await client.post(url, headers={"x-goog-api-key": cfg.api_key, "Content-Type": "application/json"}, json=payload)
+                if not response.is_success:
+                    error = _safe_provider_error(response, cfg)
+                    if error.status_code in (429, 404) and index < len(models) - 1:
+                        last_error = error
+                        continue
+                    if error.cooldown_seconds:
+                        self.cooldowns[cfg.name] = time.monotonic() + error.cooldown_seconds
+                    self.last_status[cfg.name] = {"last_error": error.reason}
+                    raise AllProvidersFailed([ProviderFailure(cfg.name, error.reason, error.status_code, error.cooldown_seconds)], error.cooldown_seconds or 60)
+                try:
+                    data = response.json()
+                    answer = "".join(part.get("text", "") for part in data["candidates"][0]["content"]["parts"] if isinstance(part, dict))
+                    if not answer.strip():
+                        raise ValueError("empty response")
+                    self.cooldowns.pop(cfg.name, None)
+                    self.last_status[cfg.name] = {"last_success": int(time.time()), "last_error": None}
+                    return ChatResult(answer.strip(), cfg.name, model_name, model_name != cfg.model)
+                except (ValueError, KeyError, IndexError, TypeError) as exc:
+                    raise AllProvidersFailed([ProviderFailure(cfg.name, "媒體分析回傳格式異常或沒有可用文字")], 60) from exc
+        if last_error:
+            raise AllProvidersFailed([ProviderFailure(cfg.name, last_error.reason, last_error.status_code, last_error.cooldown_seconds)], last_error.cooldown_seconds or 60)
+        raise AllProvidersFailed([ProviderFailure(cfg.name, "Gemini 沒有可用的媒體分析模型")], 60)
