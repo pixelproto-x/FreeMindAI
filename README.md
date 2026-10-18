@@ -55,6 +55,13 @@ Copy values into `.env`; never commit the real `.env` file.
 
 Change provider order with `PROVIDER_ORDER=groq,openrouter,gemini,custom`. Providers that are not configured are silently skipped. API keys are never returned by the status API.
 
+
+## Multimodal uploads
+
+The local chat UI supports attaching up to 5 files per message (15 MB per file, 20 MB total): common images, audio, video, PDF, plain text, Markdown, and CSV. Media bytes are sent to Gemini's native multimodal API for analysis; the other configured providers remain available for text-only chat. Configure `GEMINI_API_KEY`, a valid `GEMINI_MODEL`, and include `gemini` in `PROVIDER_ORDER` to enable attachments. Gemini model support, size limits, quotas, and supported MIME types depend on Google's current API/model rules.
+
+The app stores the user's message and filenames in chat history, not a permanent copy of the uploaded file bytes. Uploads are processed by the configured Gemini service, so do not upload sensitive files unless you are comfortable sending them to that provider. Video is sent as a video MIME attachment when supported by the selected Gemini model; FFmpeg is not required for this direct-upload path. OCR is handled by the vision model and does not require an OCR.space key.
+
 ## Hosting on Render
 
 The included `render.yaml` is a starting blueprint for a persistent hosted deployment; the web service and database use paid plans because the priority here is a persistent database and predictable availability. Review the live Render pricing and change service names/regions as needed before deployment. After provisioning, open the service's environment settings, set the provider keys, and retrieve the generated `APP_PASSWORD` through the dashboard's supported secret controls. Use HTTPS only. Do not publish that password or API keys.
