@@ -31,3 +31,5 @@ jobs:
         run: node --check static/app.js
       - name: Run tests
         run: python -m pytest -q
+      - name: Build Docker image
+        run: docker build --tag freemind-ai:ci .
