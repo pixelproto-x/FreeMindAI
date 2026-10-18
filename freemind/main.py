@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
 import logging
 import os
 import secrets
@@ -42,6 +44,35 @@ class ChatRequest(BaseModel):
         if not value:
             raise ValueError("訊息不能是空白")
         return value
+
+
+
+class MediaAttachment(BaseModel):
+    filename: str = Field(min_length=1, max_length=180)
+    mime_type: str = Field(min_length=3, max_length=100)
+    data: str = Field(min_length=1, max_length=21_000_000)
+
+
+class MediaChatRequest(BaseModel):
+    conversation_id: str = Field(min_length=1, max_length=36)
+    message: str = Field(default="請分析我附上的檔案。", max_length=12000)
+    attachments: list[MediaAttachment] = Field(min_length=1, max_length=5)
+
+    @field_validator("message")
+    @classmethod
+    def strip_media_message(cls, value: str) -> str:
+        return value.strip() or "請分析我附上的檔案。"
+
+
+ALLOWED_MEDIA_TYPES = {
+    "image/jpeg", "image/png", "image/webp", "image/gif",
+    "audio/mpeg", "audio/mp4", "audio/wav", "audio/x-wav", "audio/ogg",
+    "audio/webm", "audio/aac", "audio/flac",
+    "video/mp4", "video/mpeg", "video/quicktime", "video/webm",
+    "application/pdf", "text/plain", "text/markdown", "text/csv",
+}
+MAX_MEDIA_FILE_BYTES = 15 * 1024 * 1024
+MAX_MEDIA_TOTAL_BYTES = 20 * 1024 * 1024
 
 
 class ConversationLockPool:
@@ -181,6 +212,60 @@ def create_app(store: ChatStore | None = None, provider_manager: ProviderManager
             logger.info("chat_complete provider=%s model=%s fallback=%s", result.provider, result.model, result.fallback_used)
             return {"conversation_id": payload.conversation_id, "content": result.content, "provider": result.provider,
                     "model": result.model, "fallback_used": result.fallback_used}
+
+
+    @app.post("/api/chat/media")
+    async def chat_media(payload: MediaChatRequest, request: Request) -> dict[str, Any] | JSONResponse:
+        current_store: ChatStore = request.app.state.store
+        current_manager: ProviderManager = request.app.state.provider_manager
+        decoded_attachments: list[dict[str, str]] = []
+        total_bytes = 0
+        for item in payload.attachments:
+            mime_type = item.mime_type.lower().split(";", 1)[0].strip()
+            if mime_type not in ALLOWED_MEDIA_TYPES:
+                raise HTTPException(status_code=415, detail=f"不支援的檔案格式：{item.filename}（{mime_type}）")
+            try:
+                raw = base64.b64decode(item.data, validate=True)
+            except (binascii.Error, ValueError):
+                raise HTTPException(status_code=400, detail=f"檔案資料無效：{item.filename}")
+            if not raw:
+                raise HTTPException(status_code=400, detail=f"檔案是空的：{item.filename}")
+            if len(raw) > MAX_MEDIA_FILE_BYTES:
+                raise HTTPException(status_code=413, detail=f"單一檔案不可超過 15 MB：{item.filename}")
+            total_bytes += len(raw)
+            if total_bytes > MAX_MEDIA_TOTAL_BYTES:
+                raise HTTPException(status_code=413, detail="所有附件合計不可超過 20 MB。")
+            decoded_attachments.append({"filename": item.filename, "mime_type": mime_type, "data": base64.b64encode(raw).decode("ascii")})
+
+        filenames = "、".join(item["filename"] for item in decoded_attachments)
+        user_message = f"{payload.message.strip() or '請分析我附上的檔案。'}\n\n附件：{filenames}"
+        async with request.app.state.conversation_locks.hold(payload.conversation_id):
+            conversation = current_store.get_conversation(payload.conversation_id)
+            if not conversation:
+                raise HTTPException(status_code=404, detail="找不到這段對話，請重新開啟或建立新對話。")
+            prior = current_store.get_messages(payload.conversation_id)
+            max_context = env_int("MAX_CONTEXT_MESSAGES", 24, 4, 100)
+            max_context -= max_context % 2
+            history = [{"role": m["role"], "content": m["content"]} for m in prior if m["role"] in ("user", "assistant")]
+            history = history[-max_context:]
+            history.append({"role": "user", "content": user_message})
+            try:
+                result = await current_manager.generate_with_media(history, decoded_attachments)
+            except AllProvidersFailed as exc:
+                logger.warning("Media analysis unavailable; conversation_id=%s", payload.conversation_id)
+                return JSONResponse(status_code=503, content={
+                    "error": "目前沒有可用的多模態 AI。請確認 .env 已設定可用的 GEMINI_API_KEY，且 PROVIDER_ORDER 包含 gemini；附件尚未存入對話紀錄。",
+                    "retry_after_seconds": exc.retry_after_seconds,
+                    "failures": [{"provider": x.provider, "reason": x.reason, "status_code": x.status_code,
+                                  "cooldown_seconds": x.cooldown_seconds} for x in exc.failures],
+                })
+            try:
+                current_store.append_turn(payload.conversation_id, user_message, result.content, result.provider, result.model)
+            except KeyError:
+                raise HTTPException(status_code=404, detail="對話已被刪除，請建立新對話。")
+            logger.info("media_analysis_complete provider=%s model=%s files=%s", result.provider, result.model, len(decoded_attachments))
+            return {"conversation_id": payload.conversation_id, "content": result.content, "provider": result.provider,
+                    "model": result.model, "fallback_used": result.fallback_used, "attachments": [x["filename"] for x in decoded_attachments]}
 
     @app.get("/")
     def index() -> FileResponse:
