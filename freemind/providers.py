@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import time
 from dataclasses import dataclass
 from typing import Any
@@ -123,12 +124,17 @@ class ProviderManager:
             attempts = 2
             for attempt in range(attempts):
                 try:
-                    answer = await self._request(cfg, history)
+                    response = await self._request(cfg, history)
+                    if isinstance(response, tuple):
+                        answer, actual_model = response
+                    else:
+                        answer, actual_model = response, cfg.model
                     if not answer.strip():
                         raise ProviderError("服務回傳空白內容", retryable=True, cooldown_seconds=30)
                     self.cooldowns.pop(cfg.name, None)
                     self.last_status[cfg.name] = {"last_success": int(time.time()), "last_error": None}
-                    return ChatResult(answer.strip(), cfg.name, cfg.model, fallback_used=(index > 0 or any(item.provider != cfg.name for item in failures)))
+                    return ChatResult(answer.strip(), cfg.name, actual_model,
+                                      fallback_used=(index > 0 or actual_model != cfg.model or any(item.provider != cfg.name for item in failures)))
                 except ProviderError as exc:
                     if exc.cooldown_seconds:
                         self.cooldowns[cfg.name] = time.monotonic() + exc.cooldown_seconds
@@ -192,10 +198,18 @@ class ProviderManager:
             raise ProviderError("服務回傳格式不符合 OpenAI 相容 API", retryable=True, cooldown_seconds=30) from exc
 
     async def _request_gemini(self, client: httpx.AsyncClient, cfg: ProviderConfig,
-                              history: list[dict[str, str]]) -> str:
-        model = quote(cfg.model, safe="-._")
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
-        headers = {"x-goog-api-key": cfg.api_key, "Content-Type": "application/json"}
+                              history: list[dict[str, str]]) -> str | tuple[str, str]:
+        # A model-level fallback can keep Gemini working when a particular model's
+        # quota is exhausted. This is not a substitute for a second provider/key.
+        configured_fallbacks = os.getenv(
+            "GEMINI_FALLBACK_MODELS", "gemini-3.5-flash-lite,gemini-3.6-flash"
+        )
+        models = [cfg.model]
+        for item in configured_fallbacks.split(","):
+            model_name = item.strip()
+            if model_name and model_name not in models:
+                models.append(model_name)
+
         contents = []
         for item in history:
             role = item.get("role")
@@ -209,15 +223,33 @@ class ProviderManager:
             "contents": contents,
             "generationConfig": {"temperature": 0.7, "maxOutputTokens": self.max_output_tokens},
         }
-        response = await client.post(url, headers=headers, json=payload)
-        if not response.is_success:
-            raise _safe_provider_error(response, cfg)
-        try:
-            data = response.json()
-            parts = data["candidates"][0]["content"]["parts"]
-            text = "".join(part.get("text", "") for part in parts if isinstance(part, dict))
-            if not text:
-                raise ValueError("empty")
-            return text
-        except (ValueError, KeyError, IndexError, TypeError) as exc:
-            raise ProviderError("Gemini 回傳格式異常或沒有可用文字", retryable=True, cooldown_seconds=30) from exc
+
+        last_error: ProviderError | None = None
+        for index, model_name in enumerate(models):
+            model = quote(model_name, safe="-._")
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+            headers = {"x-goog-api-key": cfg.api_key, "Content-Type": "application/json"}
+            response = await client.post(url, headers=headers, json=payload)
+            if not response.is_success:
+                error = _safe_provider_error(response, cfg)
+                # 429 may be model-specific; 404 allows a stale/unavailable fallback
+                # name to be skipped. Authentication and other failures stop immediately.
+                if error.status_code in (429, 404) and index < len(models) - 1:
+                    last_error = error
+                    continue
+                raise error
+            try:
+                data = response.json()
+                parts = data["candidates"][0]["content"]["parts"]
+                text = "".join(part.get("text", "") for part in parts if isinstance(part, dict))
+                if not text:
+                    raise ValueError("empty")
+                if model_name == cfg.model:
+                    return text
+                return text, model_name
+            except (ValueError, KeyError, IndexError, TypeError) as exc:
+                raise ProviderError("Gemini 回傳格式異常或沒有可用文字", retryable=True, cooldown_seconds=30) from exc
+
+        if last_error:
+            raise last_error
+        raise ProviderError("Gemini 沒有可用的模型", cooldown_seconds=60)
