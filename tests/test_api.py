@@ -99,7 +99,7 @@ def test_non_ascii_app_password_is_supported(tmp_path, monkeypatch):
     app = create_app(store=ChatStore(), provider_manager=ProviderManager([]))
     with TestClient(app, client=("192.0.2.10", 12345)) as client:
         assert client.get("/api/providers").status_code == 401
-        response = client.get("/api/providers", headers={"Authorization": "Bearer-UTF8 5ris6Kmm5a+G5a+G"})
+        response = client.get("/api/providers", headers={"Authorization": "Bearer-UTF8 5ris6Kmm5a+G56K8MTIz"})
         assert response.status_code == 200
 
 
