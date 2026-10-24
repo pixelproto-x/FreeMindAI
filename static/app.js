@@ -40,7 +40,7 @@
     }
     if (response.status === 401 && !retried) {
       const password = window.prompt("這個 FreeMind AI 工作區有設定存取密碼。請輸入密碼（只保存在目前瀏覽器分頁）：");
-      if (password === null || !password.trim()) throw new Error("需要存取密碼才能使用此工作區。");
+      if (password === null || password.length === 0) throw new Error("需要存取密碼才能使用此工作區。");
       sessionStorage.setItem("freemind_app_password", password);
       return api(path, options, true);
     }
@@ -274,8 +274,9 @@
       else if (!ready) { els.healthLabel.textContent = "AI 服務暫時冷卻"; els.healthDot.className = "status-dot error"; }
       renderProviderStatus(status);
     } catch (error) {
-      els.healthDot.className = "status-dot error"; els.healthLabel.textContent = "無法連線";
-      if (els.statusDialog.open) els.statusSummary.textContent = error.message;
+      els.healthDot.className = "status-dot error";
+      els.healthLabel.textContent = error.message || "服務連線失敗";
+      if (els.statusDialog.open) els.statusSummary.textContent = error.message || "服務連線失敗";
     }
   }
 
