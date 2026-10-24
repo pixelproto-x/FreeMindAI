@@ -135,6 +135,8 @@ def create_app(store: ChatStore | None = None, provider_manager: ProviderManager
         is_local_development = environment not in {"production", "prod"} and client_host in {"127.0.0.1", "::1", "localhost"}
         if path.startswith("/api/") and path != "/api/health" and not is_local_development:
             security_headers = {
+                "Cache-Control": "no-store, max-age=0",
+                "Pragma": "no-cache",
                 "X-Content-Type-Options": "nosniff",
                 "X-Frame-Options": "SAMEORIGIN",
                 "Referrer-Policy": "no-referrer",
@@ -165,6 +167,10 @@ def create_app(store: ChatStore | None = None, provider_manager: ProviderManager
         if path.startswith("/api/") and len(request.url.query) > 2000:
             return JSONResponse(status_code=414, content={"error": "查詢參數過長。"}, headers={"X-Content-Type-Options": "nosniff", "X-Frame-Options": "SAMEORIGIN", "Referrer-Policy": "no-referrer", "Permissions-Policy": "camera=(), microphone=(), geolocation=()"})
         response = await call_next(request)
+        # The auth bootstrap and API responses must not be reused from a stale browser/proxy cache.
+        if path.startswith("/api/") or path in {"/", "/static/app.js"}:
+            response.headers["Cache-Control"] = "no-store, max-age=0"
+            response.headers["Pragma"] = "no-cache"
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
         response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
         response.headers.setdefault("Referrer-Policy", "no-referrer")
