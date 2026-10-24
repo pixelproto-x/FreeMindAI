@@ -133,7 +133,19 @@ def create_app(store: ChatStore | None = None, provider_manager: ProviderManager
         environment = os.getenv("ENVIRONMENT", "development").strip().lower()
         client_host = request.client.host if request.client else ""
         is_local_development = environment not in {"production", "prod"} and client_host in {"127.0.0.1", "::1", "localhost"}
-        if path.startswith("/api/") and path != "/api/health" and app_password and not is_local_development:
+        if path.startswith("/api/") and path != "/api/health" and not is_local_development:
+            security_headers = {
+                "X-Content-Type-Options": "nosniff",
+                "X-Frame-Options": "SAMEORIGIN",
+                "Referrer-Policy": "no-referrer",
+                "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
+            }
+            if not app_password:
+                return JSONResponse(
+                    status_code=503,
+                    content={"error": "尚未設定 APP_PASSWORD，已拒絕非本機 API 存取。"},
+                    headers=security_headers,
+                )
             auth = request.headers.get("authorization", "")
             if auth.startswith("Bearer-UTF8 "):
                 try:
@@ -145,7 +157,11 @@ def create_app(store: ChatStore | None = None, provider_manager: ProviderManager
                 expected = "Bearer " + app_password
                 password_matches = secrets.compare_digest(auth.encode("utf-8"), expected.encode("utf-8"))
             if not password_matches:
-                return JSONResponse(status_code=401, content={"error": "需要應用程式存取密碼。"}, headers={"WWW-Authenticate": "Bearer", "X-Content-Type-Options": "nosniff", "X-Frame-Options": "SAMEORIGIN", "Referrer-Policy": "no-referrer", "Permissions-Policy": "camera=(), microphone=(), geolocation=()"})
+                return JSONResponse(
+                    status_code=401,
+                    content={"error": "需要應用程式存取密碼。"},
+                    headers={"WWW-Authenticate": "Bearer", **security_headers},
+                )
         if path.startswith("/api/") and len(request.url.query) > 2000:
             return JSONResponse(status_code=414, content={"error": "查詢參數過長。"}, headers={"X-Content-Type-Options": "nosniff", "X-Frame-Options": "SAMEORIGIN", "Referrer-Policy": "no-referrer", "Permissions-Policy": "camera=(), microphone=(), geolocation=()"})
         response = await call_next(request)
