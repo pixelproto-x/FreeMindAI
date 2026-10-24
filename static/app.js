@@ -26,7 +26,12 @@
     headers.set("Accept", "application/json");
     if (options.body) headers.set("Content-Type", "application/json");
     const savedPassword = sessionStorage.getItem("freemind_app_password");
-    if (savedPassword) headers.set("Authorization", `Bearer ${savedPassword}`);
+    if (savedPassword) {
+      const bytes = new TextEncoder().encode(savedPassword);
+      let binary = "";
+      for (const byte of bytes) binary += String.fromCharCode(byte);
+      headers.set("Authorization", `Bearer-UTF8 ${btoa(binary)}`);
+    }
     let response;
     try {
       response = await fetch(path, { ...options, headers, cache: "no-store" });
