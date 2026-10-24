@@ -130,7 +130,10 @@ def create_app(store: ChatStore | None = None, provider_manager: ProviderManager
     async def security_and_auth(request: Request, call_next):
         path = request.url.path
         app_password = get_app_password()
-        if path.startswith("/api/") and path != "/api/health" and app_password:
+        environment = os.getenv("ENVIRONMENT", "development").strip().lower()
+        client_host = request.client.host if request.client else ""
+        is_local_development = environment not in {"production", "prod"} and client_host in {"127.0.0.1", "::1", "localhost"}
+        if path.startswith("/api/") and path != "/api/health" and app_password and not is_local_development:
             auth = request.headers.get("authorization", "")
             expected = "Bearer " + app_password
             if not secrets.compare_digest(auth.encode("utf-8"), expected.encode("utf-8")):
