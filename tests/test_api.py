@@ -103,6 +103,30 @@ def test_non_ascii_app_password_is_supported(tmp_path, monkeypatch):
         assert response.status_code == 200
 
 
+def test_unicode_auth_rejects_bad_and_malformed_tokens_without_500(tmp_path, monkeypatch):
+    import base64
+    import freemind.storage as storage
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'unicode-auth-invalid.db'}", connect_args={"check_same_thread": False})
+    Base.metadata.create_all(engine)
+    monkeypatch.setattr(storage, "SessionLocal", sessionmaker(bind=engine, expire_on_commit=False))
+    monkeypatch.setenv("ENVIRONMENT", "production")
+    password = "繁體中文密碼🔐"
+    monkeypatch.setenv("APP_PASSWORD", password)
+    app = create_app(store=ChatStore(), provider_manager=ProviderManager([]))
+
+    with TestClient(app, client=("192.0.2.11", 12345)) as client:
+        endpoint = "/api/providers"
+        assert client.get(endpoint).status_code == 401
+        assert client.get(endpoint, headers={"Authorization": "Bearer-UTF8 !!!"}).status_code == 401
+        wrong = base64.b64encode("錯誤密碼".encode("utf-8")).decode("ascii")
+        assert client.get(endpoint, headers={"Authorization": f"Bearer-UTF8 {wrong}"}).status_code == 401
+        correct = base64.b64encode(password.encode("utf-8")).decode("ascii")
+        response = client.get(endpoint, headers={"Authorization": f"Bearer-UTF8 {correct}"})
+        assert response.status_code == 200
+        assert response.json()["configured_count"] == 0
+
+
 def test_provider_order_can_disable_a_configured_provider(monkeypatch):
     from freemind.config import get_provider_configs
     monkeypatch.setenv("PROVIDER_ORDER", "groq")
