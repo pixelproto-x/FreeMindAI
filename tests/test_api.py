@@ -225,6 +225,7 @@ def test_windows_launcher_updates_before_starting_and_refreshes_dependencies():
     launcher = (root / "run.bat").read_text(encoding="utf-8")
     updater = (root / "update.bat").read_text(encoding="utf-8")
     assert 'call "%~dp0update.bat"' in launcher
+    assert "if defined FREEMIND_UPDATE_DONE goto :launch" in launcher
     assert "FREEMIND_UPDATE_DONE" in launcher
     assert 'pip install -r requirements.txt' in launcher
     assert ".dependencies-installed" not in launcher
