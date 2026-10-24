@@ -135,8 +135,16 @@ def create_app(store: ChatStore | None = None, provider_manager: ProviderManager
         is_local_development = environment not in {"production", "prod"} and client_host in {"127.0.0.1", "::1", "localhost"}
         if path.startswith("/api/") and path != "/api/health" and app_password and not is_local_development:
             auth = request.headers.get("authorization", "")
-            expected = "Bearer " + app_password
-            if not secrets.compare_digest(auth.encode("utf-8"), expected.encode("utf-8")):
+            if auth.startswith("Bearer-UTF8 "):
+                try:
+                    supplied_password = base64.b64decode(auth[len("Bearer-UTF8 "):], validate=True)
+                except (binascii.Error, ValueError):
+                    supplied_password = b""
+                password_matches = secrets.compare_digest(supplied_password, app_password.encode("utf-8"))
+            else:
+                expected = "Bearer " + app_password
+                password_matches = secrets.compare_digest(auth.encode("utf-8"), expected.encode("utf-8"))
+            if not password_matches:
                 return JSONResponse(status_code=401, content={"error": "需要應用程式存取密碼。"}, headers={"WWW-Authenticate": "Bearer", "X-Content-Type-Options": "nosniff", "X-Frame-Options": "SAMEORIGIN", "Referrer-Policy": "no-referrer", "Permissions-Policy": "camera=(), microphone=(), geolocation=()"})
         if path.startswith("/api/") and len(request.url.query) > 2000:
             return JSONResponse(status_code=414, content={"error": "查詢參數過長。"}, headers={"X-Content-Type-Options": "nosniff", "X-Frame-Options": "SAMEORIGIN", "Referrer-Policy": "no-referrer", "Permissions-Policy": "camera=(), microphone=(), geolocation=()"})
