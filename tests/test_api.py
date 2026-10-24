@@ -30,7 +30,7 @@ def test_health_and_chat_round_trip(tmp_path, monkeypatch):
     store = ChatStore()
     manager = FakeProviderManager()
     app = create_app(store=store, provider_manager=manager)
-    with TestClient(app) as client:
+    with TestClient(app, client=("127.0.0.1", 12345)) as client:
         assert client.get("/api/health").json()["status"] == "ok"
         created = client.post("/api/conversations", json={"title": "新對話"})
         assert created.status_code == 200
@@ -54,7 +54,7 @@ def test_no_provider_failure_does_not_save_half_turn(tmp_path, monkeypatch):
     monkeypatch.setattr(storage, "SessionLocal", sessionmaker(bind=engine, expire_on_commit=False))
     store = ChatStore()
     app = create_app(store=store, provider_manager=ProviderManager([]))
-    with TestClient(app) as client:
+    with TestClient(app, client=("127.0.0.1", 12345)) as client:
         conversation_id = client.post("/api/conversations", json={}).json()["conversation"]["id"]
         response = client.post("/api/chat", json={"conversation_id": conversation_id, "message": "Test prompt"})
         assert response.status_code == 503
@@ -199,7 +199,7 @@ def test_media_endpoint_rejects_unsupported_file_type(tmp_path, monkeypatch):
     monkeypatch.setattr(storage, "SessionLocal", sessionmaker(bind=engine, expire_on_commit=False))
     store = ChatStore()
     app = create_app(store=store, provider_manager=FakeProviderManager())
-    with TestClient(app) as client:
+    with TestClient(app, client=("127.0.0.1", 12345)) as client:
         conversation_id = client.post("/api/conversations", json={}).json()["conversation"]["id"]
         response = client.post("/api/chat/media", json={
             "conversation_id": conversation_id,
