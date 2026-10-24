@@ -76,6 +76,37 @@ def test_password_protects_api_routes(tmp_path, monkeypatch):
         assert response.status_code == 200
 
 
+def test_remote_api_fails_closed_when_password_is_unset(tmp_path, monkeypatch):
+    import freemind.storage as storage
+    engine = create_engine(f"sqlite:///{tmp_path / 'no-password-remote.db'}", connect_args={"check_same_thread": False})
+    Base.metadata.create_all(engine)
+    monkeypatch.setattr(storage, "SessionLocal", sessionmaker(bind=engine, expire_on_commit=False))
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    monkeypatch.delenv("APP_PASSWORD", raising=False)
+    app = create_app(store=ChatStore(), provider_manager=ProviderManager([]))
+    with TestClient(app, client=("192.0.2.20", 12345)) as client:
+        assert client.get("/api/health").status_code == 200
+        response = client.get("/api/providers")
+        assert response.status_code == 503
+        assert "APP_PASSWORD" in response.json()["error"]
+
+
+def test_app_password_preserves_leading_and_trailing_whitespace(tmp_path, monkeypatch):
+    import base64
+    import freemind.storage as storage
+    engine = create_engine(f"sqlite:///{tmp_path / 'whitespace-password.db'}", connect_args={"check_same_thread": False})
+    Base.metadata.create_all(engine)
+    monkeypatch.setattr(storage, "SessionLocal", sessionmaker(bind=engine, expire_on_commit=False))
+    monkeypatch.setenv("ENVIRONMENT", "production")
+    password = "  exact password  "
+    monkeypatch.setenv("APP_PASSWORD", password)
+    app = create_app(store=ChatStore(), provider_manager=ProviderManager([]))
+    token = base64.b64encode(password.encode("utf-8")).decode("ascii")
+    with TestClient(app, client=("192.0.2.21", 12345)) as client:
+        response = client.get("/api/providers", headers={"Authorization": f"Bearer-UTF8 {token}"})
+        assert response.status_code == 200
+
+
 def test_localhost_development_does_not_require_app_password(tmp_path, monkeypatch):
     import freemind.storage as storage
     engine = create_engine(f"sqlite:///{tmp_path / 'local-auth.db'}", connect_args={"check_same_thread": False})
