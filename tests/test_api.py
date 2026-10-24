@@ -118,6 +118,13 @@ def test_localhost_development_does_not_require_app_password(tmp_path, monkeypat
     with TestClient(app, client=("127.0.0.1", 12345)) as client:
         assert client.get("/api/providers").status_code == 200
         assert client.get("/api/conversations").status_code == 200
+        page = client.get("/")
+        assert page.status_code == 200
+        assert "no-store" in page.headers.get("cache-control", "")
+        assert "/static/app.js?v=auth-utf8-20261024" in page.text
+        script = client.get("/static/app.js")
+        assert script.status_code == 200
+        assert "no-store" in script.headers.get("cache-control", "")
 
 
 def test_non_ascii_app_password_is_supported(tmp_path, monkeypatch):
