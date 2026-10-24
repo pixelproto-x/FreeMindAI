@@ -1,7 +1,13 @@
 @echo off
 setlocal
 cd /d "%~dp0"
-set "PYTHON_LAUNCHER=py"
+
+rem Update from GitHub before starting. The environment flag prevents update.bat/run.bat recursion.
+if not defined FREEMIND_UPDATE_DONE (
+  set "FREEMIND_UPDATE_DONE=1"
+  call "%~dp0update.bat"
+  exit /b %errorlevel%
+)
 
 if not exist ".venv\Scripts\python.exe" (
   echo [1/3] Creating the FreeMind AI Python environment...
@@ -31,19 +37,14 @@ if not exist ".env" (
   pause >nul
 )
 
-if not exist ".venv\.dependencies-installed" (
-  echo Installing FreeMind AI dependencies. This runs only during first setup...
-  .venv\Scripts\python.exe -m pip install --upgrade pip
-  if errorlevel 1 goto :install_failed
-  .venv\Scripts\python.exe -m pip install -r requirements.txt
-  if errorlevel 1 goto :install_failed
-  echo ready>.venv\.dependencies-installed
-)
+echo [3/3] Checking and updating Python dependencies...
+".venv\Scripts\python.exe" -m pip install -r requirements.txt
+if errorlevel 1 goto :install_failed
 
 echo Starting FreeMind AI...
 echo Open http://127.0.0.1:8080 in your browser.
 echo Keep this window open while using the app. Press Ctrl+C to stop it.
-.venv\Scripts\python.exe main.py
+".venv\Scripts\python.exe" main.py
 pause
 exit /b 0
 
