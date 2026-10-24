@@ -133,6 +133,10 @@ async def test_media_chat_cools_down_after_all_gemini_models_are_rate_limited(mo
         text = '{"error":{"message":"daily quota exceeded"}}'
         headers = {}
 
+        @property
+        def is_success(self):
+            return False
+
     class FakeClient:
         async def __aenter__(self):
             return self
