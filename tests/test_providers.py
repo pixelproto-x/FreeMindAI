@@ -122,3 +122,69 @@ async def test_manager_reports_actual_fallback_model(monkeypatch):
     result = await manager.generate([{"role":"user","content":"hi"}])
     assert result.model == "backup-model"
     assert result.fallback_used is True
+
+@pytest.mark.asyncio
+async def test_media_chat_cools_down_after_all_gemini_models_are_rate_limited(monkeypatch):
+    import time
+    import freemind.providers as providers_module
+
+    class FakeResponse:
+        status_code = 429
+        text = '{"error":{"message":"daily quota exceeded"}}'
+        headers = {}
+
+    class FakeClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+        async def post(self, *_args, **_kwargs):
+            return FakeResponse()
+
+    monkeypatch.setenv("GEMINI_FALLBACK_MODELS", "backup-model")
+    monkeypatch.setenv("DAILY_QUOTA_COOLDOWN_SECONDS", "3600")
+    monkeypatch.setattr(providers_module.httpx, "AsyncClient", lambda **_kwargs: FakeClient())
+    cfg = ProviderConfig("gemini", "Gemini", "gemini", "secret", "primary-model")
+    manager = ProviderManager([cfg])
+
+    with pytest.raises(AllProvidersFailed):
+        await manager.generate_with_media(
+            [{"role": "user", "content": "請分析"}],
+            [{"filename": "image.png", "mime_type": "image/png", "data": "aGVsbG8="}],
+        )
+
+    assert manager.cooldowns["gemini"] > time.monotonic()
+    assert manager.status()[0]["state"] == "cooldown"
+    assert "last_error" in manager.last_status["gemini"]
+
+
+@pytest.mark.asyncio
+async def test_media_chat_handles_network_failure_without_leaking_server_error(monkeypatch):
+    import time
+    import freemind.providers as providers_module
+
+    class FakeClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+        async def post(self, *_args, **_kwargs):
+            raise httpx.ConnectError("offline", request=httpx.Request("POST", "https://example.invalid"))
+
+    monkeypatch.setattr(providers_module.httpx, "AsyncClient", lambda **_kwargs: FakeClient())
+    cfg = ProviderConfig("gemini", "Gemini", "gemini", "secret", "primary-model")
+    manager = ProviderManager([cfg])
+
+    with pytest.raises(AllProvidersFailed) as captured:
+        await manager.generate_with_media(
+            [{"role": "user", "content": "請分析"}],
+            [{"filename": "image.png", "mime_type": "image/png", "data": "aGVsbG8="}],
+        )
+
+    assert captured.value.failures[0].reason == "連線逾時或網路中斷"
+    assert manager.cooldowns["gemini"] > time.monotonic()
+    assert manager.status()[0]["state"] == "cooldown"
