@@ -76,6 +76,33 @@ def test_password_protects_api_routes(tmp_path, monkeypatch):
         assert response.status_code == 200
 
 
+def test_localhost_development_does_not_require_app_password(tmp_path, monkeypatch):
+    import freemind.storage as storage
+    engine = create_engine(f"sqlite:///{tmp_path / 'local-auth.db'}", connect_args={"check_same_thread": False})
+    Base.metadata.create_all(engine)
+    monkeypatch.setattr(storage, "SessionLocal", sessionmaker(bind=engine, expire_on_commit=False))
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    monkeypatch.setenv("APP_PASSWORD", "local-test-password")
+    app = create_app(store=ChatStore(), provider_manager=ProviderManager([]))
+    with TestClient(app, client=("127.0.0.1", 12345)) as client:
+        assert client.get("/api/providers").status_code == 200
+        assert client.get("/api/conversations").status_code == 200
+
+
+def test_non_ascii_app_password_is_supported(tmp_path, monkeypatch):
+    import freemind.storage as storage
+    engine = create_engine(f"sqlite:///{tmp_path / 'unicode-auth.db'}", connect_args={"check_same_thread": False})
+    Base.metadata.create_all(engine)
+    monkeypatch.setattr(storage, "SessionLocal", sessionmaker(bind=engine, expire_on_commit=False))
+    monkeypatch.setenv("ENVIRONMENT", "production")
+    monkeypatch.setenv("APP_PASSWORD", "測試密碼123")
+    app = create_app(store=ChatStore(), provider_manager=ProviderManager([]))
+    with TestClient(app, client=("192.0.2.10", 12345)) as client:
+        assert client.get("/api/providers").status_code == 401
+        response = client.get("/api/providers", headers={"Authorization": "Bearer 測試密碼123"})
+        assert response.status_code == 200
+
+
 def test_provider_order_can_disable_a_configured_provider(monkeypatch):
     from freemind.config import get_provider_configs
     monkeypatch.setenv("PROVIDER_ORDER", "groq")
