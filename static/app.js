@@ -182,10 +182,11 @@
     });
   }
 
-  async function sendMessage(textOverride = null) {
+  async function sendMessage(textOverride = null, filesOverride = null) {
     if (isSending) return;
     const message = (textOverride ?? els.input.value).trim();
-    const files = textOverride === null ? [...selectedFiles] : [];
+    // Keep the original File objects available for a retry after an upload/chat failure.
+    const files = filesOverride !== null ? [...filesOverride] : (textOverride === null ? [...selectedFiles] : []);
     if (!message && !files.length) return;
     if (!currentConversationId) {
       await createConversation();
@@ -222,10 +223,16 @@
       typing.remove();
       renderMessage({ role: "assistant", content: data.content, provider: data.provider, model: data.model, created_at: new Date().toISOString() });
       if (data.fallback_used) toast(`已自動切換至 ${data.provider}，前一個服務暫時不可用。`);
-      const conversations = await api("/api/conversations");
-      const convo = (conversations.conversations || []).find(x => x.id === currentConversationId);
-      els.title.textContent = convo?.title || "新對話";
-      renderConversationList(conversations.conversations || []);
+      // A successful AI response must not be reported as a failed send just because
+      // refreshing the sidebar failed afterward.
+      try {
+        const conversations = await api("/api/conversations");
+        const convo = (conversations.conversations || []).find(x => x.id === currentConversationId);
+        els.title.textContent = convo?.title || "新對話";
+        renderConversationList(conversations.conversations || []);
+      } catch (_refreshError) {
+        toast("AI 已成功回覆，但對話列表更新失敗；重新整理頁面即可同步。", 6000);
+      }
     } catch (error) {
       typing.remove();
       const row = document.createElement("article"); row.className = "message-row assistant";
@@ -240,7 +247,7 @@
         detail.textContent = error.data.failures.map(x => `${x.provider}：${x.reason}`).join("\n"); body.append(detail);
       }
       const retry = document.createElement("button"); retry.type = "button"; retry.className = "text-button"; retry.style.marginTop = "10px"; retry.textContent = "重試這則訊息";
-      retry.addEventListener("click", () => sendMessage(message)); body.append(retry); row.append(avatar, body); els.messages.append(row);
+      retry.addEventListener("click", () => sendMessage(message, files)); body.append(retry); row.append(avatar, body); els.messages.append(row);
       toast(error.message, 6000);
     } finally {
       setSending(false); els.input.disabled = false; els.input.focus(); scrollToBottom();
