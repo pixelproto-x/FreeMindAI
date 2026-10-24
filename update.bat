@@ -31,5 +31,7 @@ if errorlevel 1 (
 )
 
 :start_app
+set "FREEMIND_UPDATE_DONE=1"
 echo Update complete. Starting FreeMind AI...
-call run.bat
+call "%~dp0run.bat"
+exit /b %errorlevel%
