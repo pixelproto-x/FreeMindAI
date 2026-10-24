@@ -3,12 +3,12 @@ setlocal
 cd /d "%~dp0"
 
 rem Update from GitHub before starting. The environment flag prevents update.bat/run.bat recursion.
-if not defined FREEMIND_UPDATE_DONE (
-  set "FREEMIND_UPDATE_DONE=1"
-  call "%~dp0update.bat"
-  exit /b %errorlevel%
-)
+if defined FREEMIND_UPDATE_DONE goto :launch
+set "FREEMIND_UPDATE_DONE=1"
+call "%~dp0update.bat"
+exit /b %errorlevel%
 
+:launch
 if not exist ".venv\Scripts\python.exe" (
   echo [1/3] Creating the FreeMind AI Python environment...
   where py >nul 2>nul
