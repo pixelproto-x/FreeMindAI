@@ -133,7 +133,7 @@ def create_app(store: ChatStore | None = None, provider_manager: ProviderManager
         if path.startswith("/api/") and path != "/api/health" and app_password:
             auth = request.headers.get("authorization", "")
             expected = "Bearer " + app_password
-            if not secrets.compare_digest(auth, expected):
+            if not secrets.compare_digest(auth.encode("utf-8"), expected.encode("utf-8")):
                 return JSONResponse(status_code=401, content={"error": "需要應用程式存取密碼。"}, headers={"WWW-Authenticate": "Bearer", "X-Content-Type-Options": "nosniff", "X-Frame-Options": "SAMEORIGIN", "Referrer-Policy": "no-referrer", "Permissions-Policy": "camera=(), microphone=(), geolocation=()"})
         if path.startswith("/api/") and len(request.url.query) > 2000:
             return JSONResponse(status_code=414, content={"error": "查詢參數過長。"}, headers={"X-Content-Type-Options": "nosniff", "X-Frame-Options": "SAMEORIGIN", "Referrer-Policy": "no-referrer", "Permissions-Policy": "camera=(), microphone=(), geolocation=()"})
