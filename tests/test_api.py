@@ -121,7 +121,7 @@ def test_localhost_development_does_not_require_app_password(tmp_path, monkeypat
         page = client.get("/")
         assert page.status_code == 200
         assert "no-store" in page.headers.get("cache-control", "")
-        assert "/static/app.js?v=auth-utf8-20261024" in page.text
+        assert "/static/app.js?v=auth-utf8-20261025" in page.text
         script = client.get("/static/app.js")
         assert script.status_code == 200
         assert "no-store" in script.headers.get("cache-control", "")
@@ -216,3 +216,17 @@ def test_media_endpoint_rejects_unsupported_file_type(tmp_path, monkeypatch):
         assert response.status_code == 415
         assert "不支援的檔案格式" in response.json()["detail"]
         assert client.get(f"/api/conversations/{conversation_id}/messages").json()["messages"] == []
+
+
+def test_windows_launcher_updates_before_starting_and_refreshes_dependencies():
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    launcher = (root / "run.bat").read_text(encoding="utf-8")
+    updater = (root / "update.bat").read_text(encoding="utf-8")
+    assert 'call "%~dp0update.bat"' in launcher
+    assert "FREEMIND_UPDATE_DONE" in launcher
+    assert 'pip install -r requirements.txt' in launcher
+    assert ".dependencies-installed" not in launcher
+    assert 'set "FREEMIND_UPDATE_DONE=1"' in updater
+    assert 'call "%~dp0run.bat"' in updater
