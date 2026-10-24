@@ -84,7 +84,9 @@ def get_provider_configs() -> list[ProviderConfig]:
 
 
 def get_app_password() -> str:
-    return _get("APP_PASSWORD")
+    # Passwords are secrets, not ordinary configuration labels: preserve intentional
+    # leading/trailing whitespace exactly as supplied by the environment or .env.
+    return os.getenv("APP_PASSWORD", "")
 
 
 def get_database_url() -> str:
