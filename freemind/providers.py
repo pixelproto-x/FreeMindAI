@@ -292,7 +292,21 @@ class ProviderManager:
         async with httpx.AsyncClient(timeout=timeout, follow_redirects=False) as client:
             for index, model_name in enumerate(models):
                 url = f"https://generativelanguage.googleapis.com/v1beta/models/{quote(model_name, safe='-._')}:generateContent"
-                response = await client.post(url, headers={"x-goog-api-key": cfg.api_key, "Content-Type": "application/json"}, json=payload)
+                try:
+                    response = await client.post(
+                        url,
+                        headers={"x-goog-api-key": cfg.api_key, "Content-Type": "application/json"},
+                        json=payload,
+                    )
+                except (httpx.TimeoutException, httpx.NetworkError):
+                    reason = "連線逾時或網路中斷"
+                    cooldown = env_int("PROVIDER_ERROR_COOLDOWN_SECONDS", 60, 15, 1800)
+                    self.cooldowns[cfg.name] = time.monotonic() + cooldown
+                    self.last_status[cfg.name] = {"last_error": reason}
+                    raise AllProvidersFailed(
+                        [ProviderFailure(cfg.name, reason, cooldown_seconds=cooldown)],
+                        cooldown,
+                    )
                 if not response.is_success:
                     error = _safe_provider_error(response, cfg)
                     if error.status_code in (429, 404) and index < len(models) - 1:
@@ -313,5 +327,13 @@ class ProviderManager:
                 except (ValueError, KeyError, IndexError, TypeError) as exc:
                     raise AllProvidersFailed([ProviderFailure(cfg.name, "媒體分析回傳格式異常或沒有可用文字")], 60) from exc
         if last_error:
-            raise AllProvidersFailed([ProviderFailure(cfg.name, last_error.reason, last_error.status_code, last_error.cooldown_seconds)], last_error.cooldown_seconds or 60)
+            # Keep the same cooldown/status behavior as text chat when all Gemini
+            # model-level fallbacks are exhausted, especially after HTTP 429.
+            if last_error.cooldown_seconds:
+                self.cooldowns[cfg.name] = time.monotonic() + last_error.cooldown_seconds
+            self.last_status[cfg.name] = {"last_error": last_error.reason}
+            raise AllProvidersFailed(
+                [ProviderFailure(cfg.name, last_error.reason, last_error.status_code, last_error.cooldown_seconds)],
+                last_error.cooldown_seconds or 60,
+            )
         raise AllProvidersFailed([ProviderFailure(cfg.name, "Gemini 沒有可用的媒體分析模型")], 60)
