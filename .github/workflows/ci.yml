@@ -33,3 +33,38 @@ jobs:
         run: python -m pytest -q
       - name: Build Docker image
         run: docker build --tag freemind-ai:ci .
+      - name: Smoke-test production container authentication
+        shell: bash
+        run: |
+          set -euo pipefail
+          password='繁體中文密碼🔐é'
+          token="$(printf '%s' "$password" | base64 -w0)"
+          wrong_token="$(printf '%s' '錯誤密碼' | base64 -w0)"
+          docker run --rm --detach --name freemind-auth-smoke \
+            --publish 127.0.0.1:18080:8080 \
+            --env "APP_PASSWORD=$password" \
+            freemind-ai:ci
+          trap 'docker rm -f freemind-auth-smoke >/dev/null 2>&1 || true' EXIT
+
+          ready=0
+          for attempt in $(seq 1 30); do
+            if curl --silent --show-error --fail http://127.0.0.1:18080/api/health >/dev/null; then
+              ready=1
+              break
+            fi
+            sleep 1
+          done
+          test "$ready" = 1
+
+          unauthenticated_status="$(curl --silent --show-error -o /tmp/freemind-no-auth.json -w '%{http_code}' http://127.0.0.1:18080/api/providers)"
+          test "$unauthenticated_status" = 401
+          wrong_status="$(curl --silent --show-error -o /tmp/freemind-wrong-auth.json -w '%{http_code}' \
+            -H "Authorization: Bearer-UTF8 $wrong_token" http://127.0.0.1:18080/api/providers)"
+          test "$wrong_status" = 401
+          authorized_status="$(curl --silent --show-error -o /tmp/freemind-authorized.json -w '%{http_code}' \
+            -H "Authorization: Bearer-UTF8 $token" http://127.0.0.1:18080/api/providers)"
+          test "$authorized_status" = 200
+          conversation_status="$(curl --silent --show-error -o /tmp/freemind-conversations.json -w '%{http_code}' \
+            -H "Authorization: Bearer-UTF8 $token" http://127.0.0.1:18080/api/conversations)"
+          test "$conversation_status" = 200
+          echo "Production-container smoke test passed: health=200, missing/wrong password=401, UTF-8 password providers/conversations=200."
