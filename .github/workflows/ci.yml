@@ -68,3 +68,64 @@ jobs:
             -H "Authorization: Bearer-UTF8 $token" http://127.0.0.1:18080/api/conversations)"
           test "$conversation_status" = 200
           echo "Production-container smoke test passed: health=200, missing/wrong password=401, UTF-8 password providers/conversations=200."
+
+  windows-launcher:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: windows-latest
+    env:
+      ENVIRONMENT: production
+      APP_PASSWORD: "繁體中文密碼🔐é"
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Prepare an isolated local project
+        shell: pwsh
+        run: |
+          git fetch origin +refs/heads/main:refs/remotes/origin/main
+          git switch --force-create main "$env:GITHUB_SHA"
+          python -m venv .venv
+          [System.IO.File]::WriteAllText((Join-Path $PWD '.env'), '')
+      - name: Start via run.bat and verify password-protected APIs
+        shell: pwsh
+        timeout-minutes: 8
+        run: |
+          $stdoutLog = Join-Path $PWD 'launcher-test.stdout.log'
+          $stderrLog = Join-Path $PWD 'launcher-test.stderr.log'
+          $process = Start-Process -FilePath $env:ComSpec -ArgumentList @('/d', '/c', 'run.bat') -WorkingDirectory $PWD -RedirectStandardOutput $stdoutLog -RedirectStandardError $stderrLog -PassThru -WindowStyle Hidden
+          try {
+            $deadline = (Get-Date).AddMinutes(6)
+            $healthy = $false
+            while ((Get-Date) -lt $deadline) {
+              $process.Refresh()
+              if ($process.HasExited) {
+                throw "run.bat exited before the server became healthy (exit code $($process.ExitCode))."
+              }
+              try {
+                $health = Invoke-RestMethod -Uri 'http://127.0.0.1:8080/api/health' -TimeoutSec 2
+                if ($health.status -eq 'ok') { $healthy = $true; break }
+              } catch {}
+              Start-Sleep -Seconds 2
+            }
+            if (-not $healthy) { throw 'run.bat did not become healthy within six minutes.' }
+
+            $password = $env:APP_PASSWORD
+            $token = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($password))
+            $wrongToken = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes('錯誤密碼'))
+            $unauthenticated = (& curl.exe --silent --show-error --output NUL --write-out '%{http_code}' 'http://127.0.0.1:8080/api/providers').Trim()
+            $wrong = (& curl.exe --silent --show-error --output NUL --write-out '%{http_code}' --header "Authorization: Bearer-UTF8 $wrongToken" 'http://127.0.0.1:8080/api/providers').Trim()
+            $authorized = (& curl.exe --silent --show-error --output NUL --write-out '%{http_code}' --header "Authorization: Bearer-UTF8 $token" 'http://127.0.0.1:8080/api/providers').Trim()
+            $conversations = (& curl.exe --silent --show-error --output NUL --write-out '%{http_code}' --header "Authorization: Bearer-UTF8 $token" 'http://127.0.0.1:8080/api/conversations').Trim()
+
+            if ($unauthenticated -ne '401') { throw "Missing password must return 401; got $unauthenticated." }
+            if ($wrong -ne '401') { throw "Wrong password must return 401; got $wrong." }
+            if ($authorized -ne '200') { throw "Correct UTF-8 password must return 200 for /api/providers; got $authorized." }
+            if ($conversations -ne '200') { throw "Correct UTF-8 password must return 200 for /api/conversations; got $conversations." }
+            Write-Host 'Windows launcher smoke test passed: run.bat updated, started the server, rejected missing/wrong passwords, and accepted the UTF-8 password.'
+          } finally {
+            & taskkill.exe /PID $process.Id /T /F 2>$null | Out-Null
+          }
+
