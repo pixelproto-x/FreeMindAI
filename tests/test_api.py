@@ -141,6 +141,23 @@ def test_non_ascii_app_password_is_supported(tmp_path, monkeypatch):
         assert response.status_code == 200
 
 
+
+def test_auth_password_comparison_uses_utf8_bytes_and_rejects_invalid_schemes():
+    import base64
+    from freemind.main import _auth_password_matches
+
+    password = "繁體中文密碼🔐e\u0301  "
+    token = base64.b64encode(password.encode("utf-8")).decode("ascii")
+
+    assert _auth_password_matches(f"Bearer-UTF8 {token}", password)
+    assert _auth_password_matches(f"bearer-utf8 {token}", password)
+    assert _auth_password_matches(f"Bearer {password}", password)
+    assert not _auth_password_matches(f"Bearer-UTF8 {token}", password + "x")
+    assert not _auth_password_matches("Bearer-UTF8 !!!", password)
+    assert not _auth_password_matches(f"Basic {token}", password)
+    assert not _auth_password_matches("Bearer", password)
+
+
 def test_unicode_auth_rejects_bad_and_malformed_tokens_without_500(tmp_path, monkeypatch):
     import base64
     import freemind.storage as storage
