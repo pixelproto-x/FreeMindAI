@@ -29,6 +29,34 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 STATIC_DIR = BASE_DIR / "static"
 
 
+def _auth_password_matches(auth_header: str, app_password: str) -> bool:
+    """Compare an Authorization credential without ever comparing Unicode strings."""
+    try:
+        expected = app_password.encode("utf-8")
+    except UnicodeEncodeError:
+        return False
+
+    scheme, separator, credential = auth_header.partition(" ")
+    if not separator:
+        return False
+
+    if scheme.casefold() == "bearer-utf8":
+        try:
+            supplied = base64.b64decode(credential, validate=True)
+        except (binascii.Error, ValueError):
+            return False
+    elif scheme.casefold() == "bearer":
+        try:
+            supplied = credential.encode("utf-8")
+        except UnicodeEncodeError:
+            return False
+    else:
+        return False
+
+    # compare_digest is restricted to ASCII-only strings; bytes support full UTF-8.
+    return secrets.compare_digest(supplied, expected)
+
+
 class CreateConversationRequest(BaseModel):
     title: str = Field(default="新對話", max_length=120)
 
@@ -149,15 +177,7 @@ def create_app(store: ChatStore | None = None, provider_manager: ProviderManager
                     headers=security_headers,
                 )
             auth = request.headers.get("authorization", "")
-            if auth.startswith("Bearer-UTF8 "):
-                try:
-                    supplied_password = base64.b64decode(auth[len("Bearer-UTF8 "):], validate=True)
-                except (binascii.Error, ValueError):
-                    supplied_password = b""
-                password_matches = secrets.compare_digest(supplied_password, app_password.encode("utf-8"))
-            else:
-                expected = "Bearer " + app_password
-                password_matches = secrets.compare_digest(auth.encode("utf-8"), expected.encode("utf-8"))
+            password_matches = _auth_password_matches(auth, app_password)
             if not password_matches:
                 return JSONResponse(
                     status_code=401,
