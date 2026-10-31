@@ -7,7 +7,7 @@ from typing import Any
 from uuid import uuid4
 
 from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, create_engine, event, select
-from sqlalchemy.engine import Engine
+from sqlalchemy.engine import Engine, make_url
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, sessionmaker
 
 from .config import get_database_url
@@ -40,25 +40,62 @@ class Message(Base):
     conversation: Mapped[Conversation] = relationship(back_populates="messages")
 
 
+def _resolve_database_url(url: str) -> str:
+    """Resolve relative SQLite files from the project root, not the caller's CWD."""
+    parsed = make_url(url)
+    if not parsed.drivername.startswith("sqlite") or not parsed.database:
+        return url
+
+    database = parsed.database
+    if database == ":memory:" or database.startswith("file:"):
+        return url
+
+    db_path = Path(database).expanduser()
+    if not db_path.is_absolute():
+        project_root = Path(__file__).resolve().parents[1]
+        db_path = project_root / db_path
+    db_path = db_path.resolve()
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    return parsed.set(database=str(db_path)).render_as_string(hide_password=False)
+
+
+def _configure_sqlite_connection(dbapi_connection: Any) -> None:
+    cursor = dbapi_connection.cursor()
+    try:
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.execute("PRAGMA busy_timeout=15000")
+        try:
+            cursor.execute("PRAGMA journal_mode=WAL")
+        except Exception as wal_error:
+            # WAL needs sidecar files and may be unavailable on some Windows
+            # folders, synced directories, or restricted filesystems. Keep the
+            # existing database and fall back to SQLite's rollback journal.
+            try:
+                cursor.execute("PRAGMA journal_mode=DELETE")
+            except Exception as fallback_error:
+                raise RuntimeError(
+                    "SQLite 無法啟用 WAL，也無法回退 DELETE journal mode。"
+                    f" WAL: {wal_error}; DELETE: {fallback_error}"
+                ) from fallback_error
+            print(
+                "[Storage] WAL 無法啟用，已回退至 DELETE journal mode："
+                f"{wal_error}"
+            )
+    finally:
+        cursor.close()
+
+
 def _make_engine() -> Engine:
-    url = get_database_url()
+    url = _resolve_database_url(get_database_url())
     connect_args: dict[str, Any] = {}
     if url.startswith("sqlite:"):
-        # Ensure the default data directory exists before SQLite opens the database.
-        if url in ("sqlite:///./data/freemind.db", "sqlite:///data/freemind.db"):
-            Path("data").mkdir(parents=True, exist_ok=True)
         connect_args = {"check_same_thread": False, "timeout": 15}
     engine = create_engine(url, pool_pre_ping=True, connect_args=connect_args)
     if url.startswith("sqlite:"):
         @event.listens_for(engine, "connect")
         def _sqlite_pragmas(dbapi_connection: Any, _record: Any) -> None:
-            cursor = dbapi_connection.cursor()
-            cursor.execute("PRAGMA foreign_keys=ON")
-            cursor.execute("PRAGMA journal_mode=WAL")
-            cursor.execute("PRAGMA busy_timeout=15000")
-            cursor.close()
+            _configure_sqlite_connection(dbapi_connection)
     return engine
-
 
 engine = _make_engine()
 SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
